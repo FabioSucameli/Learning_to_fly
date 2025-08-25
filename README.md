@@ -30,7 +30,7 @@ This guide consolidates the steps and changes needed to reproduce **Task 1 — S
 
 ---
 
-## 1) Environment Setup (Windows + Anaconda)
+## Environment Setup (Windows + Anaconda)
 
 ### Quick start
 ```bash
@@ -59,7 +59,7 @@ conda activate drones
 
 ---
 
-## 2) Dependencies
+## Dependencies
 
 You can pin the key packages in a `requirements.txt` (example below), then run `pip install -r requirements.txt` *before* `pip3 install -e .` if you prefer stricter versioning.
 
@@ -81,7 +81,7 @@ wandb>=0.13.0
 
 ---
 
-## 3) Repository layout (as used here)
+## Repository layout (as used here)
 
 The root of the project is organized like this:
 
@@ -90,7 +90,6 @@ The root of the project is organized like this:
 ├─ gym_pybullet_drones/
 ├─ results/                # saved models, logs, evaluations
 ├─ wandb/                  # Weights & Biases runs
-├─ shared_constants.py
 ├─ singleagent.py          # training (PPO/SAC/A2C) + wandb
 └─ test_singleagent.py     # testing/comparison + wandb
 ```
@@ -100,7 +99,7 @@ The root of the project is organized like this:
 
 ---
 
-## 4) Training: Single‑agent Take‑off / Hover
+## Training: Single‑agent Take‑off / Hover
 
 > **Tasks**: use `--env takeoff` for the take‑off stabilization task and `--env hover` for the single‑drone hover task. Kinematic observations (`--obs kin`) and `one_d_rpm` actions are a robust starting point.
 
@@ -146,7 +145,7 @@ python singleagent.py --env hover --algo ppo --project "my-drone-experiments"
 
 ---
 
-## 5) Testing & Evaluation
+## Testing & Evaluation
 
 > The testing script is located at the repository root (see layout above). In the commands below, use the placeholder `<TEST_SCRIPT>.py` to refer to it.
 
@@ -190,7 +189,7 @@ python <TEST_SCRIPT>.py --exp_dir ./results --pattern "save-<ENV>-*-<OBS>-<ACT>-
 
 ---
 
-## 6) Weights & Biases (optional)
+## Weights & Biases (optional)
 
 ```bash
 pip install wandb           # if not already installed
@@ -201,8 +200,104 @@ During training/testing the scripts log rewards, episode lengths, losses, evalua
 
 ---
 
-## 7) References
+## Task Overview
+
+This section contains my **reproduction** of Task 1 "Single Agent Take‑off and Hover".
+
+
+The goal is to compare **A2C**, **PPO**, and **SAC** on the simplified **kinematics** observation model with **ONE\_D\_RPM** action (thrust along body-z), using **default SB3 hyperparameters** and a **shared MLP** backbone, closely mirroring the paper’s setup.
+
+
+Take off and **hover** at a fixed set-point. The reward is the **negative squared Euclidean distance** to the set-point (best ≈ **0** when the agent perfectly tracks the target at every step).
+
+**Protocol**  
+- **Training budget**: **35,000 timesteps**  
+- **Evaluation**: periodic runs on a fixed test battery 
+- **Seed:** fixed per run (I used 98 in this experiment)
+
+---
+
+## Results
+
+### Learning curves 
+
+![eval/mean_reward vs timesteps](./results/eval_mean_reward.png)
+
+- **Ordering**: **SAC (green) > PPO (red) > A2C (purple)** across most of training.
+- **Stability**: A2C shows occasional sharp drops; PPO is moderately stable; SAC is the most stable.
+- **Interpretation**: Moving upward (toward 0) means better tracking/hovering. Exact 0 is a theoretical upper bound.
+
+*Note:* The **A2C** values occasionally fall outside the zoomed y-range and therefore do not appear in this panel.
+
+
+
+> For completeness, the *running best* is also provided:  
+![eval/best_mean_reward](./results/eval_best_mean_reward.png)
+
+
+
+### Final test performance
+
+Two compact summaries:
+
+- **Mean Episode Reward per Algorithm**  
+  ![barplot mean reward](./results/mean_episode_reward.png)
+
+- **Episode Reward Summary (best/mean/worst)**  
+  ![episode reward summary](./results/episode_reward_summary.png)
+
+**Takeaway at the fixed budget:** SAC has the **highest** mean reward (closest to 0), PPO is **second**, A2C is **third** and more variable.
+
+### Compute cost
+
+![training_time_seconds](./results/training_time_per_second.png)
+
+- **SAC** takes **significantly longer** wall‑clock time at the same 35k steps (expected for an off‑policy method with more gradient updates per sample).  
+- **PPO**/**A2C** are considerably faster to train.
+
+---
+
+
+## Conclusions
+
+
+- **Alignment:** The **qualitative ranking** (**SAC > PPO > A2C**) and the **relative stability** match the paper’s message for Task 1: **SAC performs best**, **PPO** is a competitive second, and **A2C** is more **unstable** without hyperparameter tuning.  
+
+- **Spikes** are expected in RL due to environment randomness, policy stochasticity, and limited evaluation batches.
+
+- **Practical trade‑off:** SAC achieves the best control quality **at a higher compute cost**; PPO offers a solid quality‑time compromise; A2C is fastest but less reliable.  
+
+
+
+
+---
+
+## References
 
 - Repository: **utiasDSL/gym-pybullet-drones** (use the `paper` branch).
 - Paper (IROS 2021): *Learning to Fly — a Gym Environment with PyBullet Physics for Reinforcement Learning of Multi‑agent Quadcopter Control*.
 - Stable‑Baselines3 and PyBullet documentation for advanced configuration.
+
+---
+
+## References
+
+- **Paper (IROS 2021)**  
+  J. Panerati, H. Zheng, S. Zhou, J. Xu, A. Prorok, A. P. Schoellig.  
+  *Learning to Fly — a Gym Environment with PyBullet Physics for Reinforcement Learning of Multi-agent Quadcopter Control.* IROS 2021.  
+  DOI: https://doi.org/10.1109/IROS51168.2021.9635857 • PDF (arXiv): https://arxiv.org/abs/2103.02142
+
+- **Environment repository**  
+  **utiasDSL/gym-pybullet-drones** — original codebase for the paper.  
+  GitHub: https://github.com/utiasDSL/gym-pybullet-drones  
+  Docs: https://utiasdsl.github.io/gym-pybullet-drones/  
+  Branch for the IROS’21 release: `paper`
+
+- **Stable-Baselines3 (RL library)**  
+  Docs: https://stable-baselines3.readthedocs.io/  
+  GitHub: https://github.com/DLR-RM/stable-baselines3  
+  Paper (JMLR): https://jmlr.org/papers/volume22/20-1364/20-1364.pdf
+
+- **PyBullet (physics engine)**  
+  Website: https://pybullet.org/  
+
