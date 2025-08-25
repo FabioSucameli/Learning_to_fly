@@ -267,17 +267,6 @@ Two compact summaries:
 
 - **Practical trade‑off:** SAC achieves the best control quality **at a higher compute cost**; PPO offers a solid quality‑time compromise; A2C is fastest but less reliable.  
 
-
-
-
----
-
-## References
-
-- Repository: **utiasDSL/gym-pybullet-drones** (use the `paper` branch).
-- Paper (IROS 2021): *Learning to Fly — a Gym Environment with PyBullet Physics for Reinforcement Learning of Multi‑agent Quadcopter Control*.
-- Stable‑Baselines3 and PyBullet documentation for advanced configuration.
-
 ---
 
 ## References
