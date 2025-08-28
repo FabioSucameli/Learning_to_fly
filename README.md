@@ -13,12 +13,6 @@
   <a href="https://www.gymlibrary.dev/">
     <img alt="Gym" src="https://img.shields.io/badge/Gym-0.21.0-3C873A">
   </a>
-  <a href="https://wandb.ai/site">
-    <img alt="Weights & Biases" src="https://img.shields.io/badge/Weights%20%26%20Biases-Enabled-FFBE00?logo=weightsandbiases&logoColor=white">
-  </a>
-  <a href="https://www.anaconda.com/">
-    <img alt="Windows + Anaconda" src="https://img.shields.io/badge/Windows%20%2B%20Anaconda-Supported-0078D6?logo=windows&logoColor=white">
-  </a>
 </p>
 
 This guide consolidates the steps and changes needed to reproduce **Task 1 — Single‑Agent Take‑off and Hover** from the paper *“Learning to Fly — a Gym Environment with PyBullet Physics for Reinforcement Learning of Multi‑agent Quadcopter Control”* (IROS 2021). It explains how to create the environment, lists dependencies, and documents how the repository was reorganized to run training/testing with experiment tracking.
@@ -189,7 +183,7 @@ python <TEST_SCRIPT>.py --exp_dir ./results --pattern "save-<ENV>-*-<OBS>-<ACT>-
 
 ---
 
-## Weights & Biases (optional)
+## Weights & Biases
 
 ```bash
 pip install wandb           # if not already installed
