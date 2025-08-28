@@ -210,7 +210,31 @@ Take off and **hover** at a fixed set-point. The reward is the **negative square
 - **Seed:** fixed per run (I used 98 in this experiment)
 
 ---
+## Demo: Take-off & Hover 
 
+This demo illustrates the target behavior of **Task 1**: starting from rest near the ground, the quadrotor must **climb to a commanded altitude** (the set-point $z^\star$) and then **hold that altitude** stably. 
+
+**What to look for in the demo**
+- A **smooth climb** (short rise time), **small overshoot**, and **fast settling** into the hover band.
+- During hover, altitude oscillations should be small and the vertical speed should fluctuate around zero.
+
+![Take-off & hover (GIF)](results/sac_takeoff_hover.gif)
+
+
+
+**A successful rollout has two phases:**
+
+- **Take-off (transient):** accelerate upward, reach the neighborhood of $z^\star$ quickly, with limited **overshoot**.
+- **Hover (steady state):** remain close to $z^\star$ with near-zero vertical speed.  
+  In this plot, the **hover band** is entered once, for at least $0.5\,\mathrm{s}$, both $|z - z^\star| \le 1.5\,\mathrm{cm}$ and $|\dot{z}| \le 0.02\,\mathrm{m/s}$.
+
+![Altitude & vertical speed](results/sac_z_traj.png)
+
+*Controller used in the clip.*  
+In this illustration is used the policy that ranked **best in evaluation** (SAC; see *Results* for the full comparison).  
+
+
+---
 ## Results
 
 ### Learning curves 
