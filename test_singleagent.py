@@ -134,129 +134,123 @@ def evaluate_model(model, env, n_episodes: int = 10, *, deterministic: bool = Tr
     }
 
 
+
 # Esegue un breve rollout con render/recording e genera un grafico di take-off/hover.
-# Logga lo stato tramite Logger se l'osservazione è di tipo KIN.
 # Calcola quota z(t) e velocità , decollo e stabilizzazione
-def run_visual_test(model, env, obs_type: ObservationType, duration: int = 6, *, deterministic: bool = True)\
+def run_visual_test(model, env, obs_type: ObservationType, duration: int = 6, *, deterministic: bool = True) \
         -> Tuple[Optional[str], float]:
     print(f"[INFO] Running visual test for {duration} seconds (deterministic={deterministic})...")
-    logger = Logger(logging_freq_hz=int(env.SIM_FREQ / env.AGGR_PHY_STEPS), num_drones=1)
+
     obs = _safe_reset(env)
     start = time.time()
+
     steps = duration * int(env.SIM_FREQ / env.AGGR_PHY_STEPS)
     total_r = 0.0
 
-    ts_list, z_list = [], []
+    ts_list, z_list, vz_list = [], [], []
     dt = float(env.AGGR_PHY_STEPS) / float(env.SIM_FREQ)
 
+    # per la derivata numerica se serve
+    last_z = None
+    last_t = None
+
     for i in range(steps):
+        # azione e step
         action, _ = model.predict(obs, deterministic=deterministic)
         obs, r, done, info = _safe_step(env, action)
         total_r += float(r)
-        
-        # Lettura quota
-        try:
-            z_val = float(env._getDroneStateVector(0)[2])
-        except Exception:
-            flat = np.array(obs).flatten()
-            z_val = float(flat[2]) if flat.size >= 3 else (z_list[-1] if z_list else 0.0)
-        ts_list.append(i * dt)
-        z_list.append(z_val)
-        # Render best-effort
+
+        # stato "vero" da PyBullet
+        state = env.unwrapped._getDroneStateVector(0)
+
+        # mapping
+        z_true = float(state[2])          # quota
+        vz_raw = float(state[12])         # velocità verticale
+
+        # fallback: se per qualche motivo è zero/NaN, calcolo la derivata
+        t_now = i * dt
+        if not np.isfinite(vz_raw) or abs(vz_raw) < 1e-10:
+            if last_z is not None:
+                vz_raw = (z_true - last_z) / (t_now - last_t)
+            else:
+                vz_raw = 0.0
+        last_z, last_t = z_true, t_now
+
+        ts_list.append(t_now)
+        z_list.append(z_true)
+        vz_list.append(vz_raw)
+
+        # render non-bloccante
         try:
             env.render()
         except Exception:
-            pass
-        # Solo per KIN log vettori di stato/controllo minimi per le utility del Logger
-        if obs_type == ObservationType.KIN:
-            try:
-                act4 = np.resize(action, (4,))
-            except Exception:
-                act4 = np.zeros(4)
-            state = np.hstack([
-                np.array(obs[0:3]).reshape(-1),  # pos xyz
-                np.zeros(4),                     # placeholder quaternione
-                np.array(obs[3:15]).reshape(-1), # vel/ang vel (a seconda dell'osservazione)
-                act4                             # comandi                        
-            ])
-            logger.log(drone=0, timestamp=i / env.SIM_FREQ, state=state, control=np.zeros(12))
-        # Sincronizzazione real-time (approx) per avere velocità costante di simulazione
+            pass        
+
         sync(np.floor(i * env.AGGR_PHY_STEPS), start, env.TIMESTEP)
+
     print(f"[INFO] Visual test completed. Total reward: {total_r:.4f}")
-    #Salvataggio log CSV e plot interni del Logger
-    log_path: Optional[str] = None
-    try:
-        log_path = logger.save_as_csv("test_results")
-        if log_path is not None:
-            log_path = str(log_path)
-        logger.plot()
-        print(f"[INFO] Saved CSV log to: {log_path if log_path else 'N/A'}")
-    except Exception as e:
-        print(f"[WARNING] Failed to save/plot logs: {e}")
-    # Plot take-off + hover
+
+    # — grafico take-off + hover —
     try:
         ts = np.asarray(ts_list)
         z  = np.asarray(z_list)
-        if ts.size >= 2 and z.size == ts.size:
-            # z'(t) numerica
-            vz = np.gradient(z, ts, edge_order=1)
+        vz = np.asarray(vz_list)
 
-            # quota target: dall'env se disponibile, fallback = mediana coda
-            target_z = None
-            for attr in ("TARGET_POS", "TARGET_POS_HOVER", "HOVERING_Z", "TARGET_HEIGHT"):
-                if hasattr(env, attr):
-                    val = getattr(env, attr)
+        # target z: da env se disponibile; altrimenti dalla mediana finale
+        target_z = None
+        for attr in ("TARGET_POS", "TARGET_POS_HOVER", "HOVERING_Z", "TARGET_HEIGHT"):
+            if hasattr(env, attr):
+                val = getattr(env, attr)
+                try:
+                    target_z = float(val[2])
+                except Exception:
                     try:
-                        target_z = float(val[2])  # se vettore [x,y,z]
+                        target_z = float(val)
                     except Exception:
-                        try:
-                            target_z = float(val)   # se scalare
-                        except Exception:
-                            pass
-                    if target_z is not None:
-                        break
-            if target_z is None:
-                tail = max(10, int(0.3*len(z)))
-                target_z = float(np.median(z[-tail:]))
+                        pass
+                if target_z is not None:
+                    break
+        if target_z is None:
+            tail = max(10, int(0.3 * len(z)))
+            target_z = float(np.median(z[-tail:]))
 
-            # Rilevazione minimal di hover: finestra ~0.5 s, bande su z e z'
-            band_z, band_v = 0.015, 0.02   # +-1.5 cm, 0.02 m/s
-            win = max(8, int(0.5 / dt))    # ~0.5 s di finestra
-            ok = (np.abs(z - target_z) <= band_z) & (np.abs(vz) <= band_v)
-            idx_hover = next((i for i in range(len(z) - win) if np.all(ok[i:i+win])), len(z) - 1)
+        # rilevamento inizio hover
+        band_z, band_v = 0.015, 0.02
+        win = max(8, int(0.5 / dt))
+        ok = (np.abs(z - target_z) <= band_z) & (np.abs(vz) <= band_v)
+        idx_hover = next((k for k in range(len(z) - win) if np.all(ok[k:k + win])), len(z) - 1)
 
-            # Plot: serie quota, linea target, evidenzia decollo e inizio hover
-            fig, ax1 = plt.subplots(figsize=(7.5, 4.5))
-            ax1.plot(ts, z, lw=2.4, color="#1f77b4", label="z(t) [m]")
-            ax1.axhline(target_z, ls=(0,(6,6)), lw=1.6, color="#7f8c8d", alpha=0.9, label="target altitude")
-            ax1.set_xlabel("Time [s]"); ax1.set_ylabel("Altitude z [m]")
+        fig, ax1 = plt.subplots(figsize=(7.5, 4.5))
+        ax1.plot(ts, z, lw=2.4, color="#1f77b4", label="z(t) [m]")
+        ax1.axhline(target_z, ls=(0, (6, 6)), lw=1.6, color="#7f8c8d", alpha=0.9, label="target altitude")
+        ax1.set_xlabel("Time [s]")
+        ax1.set_ylabel("Altitude z [m]")
 
-            # decollo: solo fino a idx_hover 
-            ax1.axvspan(ts[0], ts[idx_hover], facecolor="#fde68a", alpha=0.35, label="take-off")
-            if idx_hover == len(z) - 1:
-                print("[INFO] Hover not detected within the time window: increase --visual_duration or relax thresholds.")
-            else:
-                ax1.axvline(ts[idx_hover], color="#d35400", lw=1.2, ls=":", label="hover start")
+        ax1.axvspan(ts[0], ts[idx_hover], facecolor="#fde68a", alpha=0.35, label="take-off")
+        if idx_hover != len(z) - 1:
+            ax1.axvline(ts[idx_hover], color="#d35400", lw=1.2, ls=":", label="hover start")
+        else:
+            print("[INFO] Hover not detected within the time window: consider increasing duration or relaxing thresholds.")
 
-            ax2 = ax1.twinx()
-            ax2.plot(ts, vz, lw=1.8, ls="--", color="#16a085", label="ż(t) [m/s]")
-            ax2.set_ylabel("Vertical speed ż [m/s]")
+        ax2 = ax1.twinx()
+        ax2.plot(ts, vz, lw=1.8, ls="--", color="#16a085", label="ż(t) [m/s]")
+        ax2.set_ylabel("Vertical speed ż [m/s]")
 
-            h1, l1 = ax1.get_legend_handles_labels()
-            h2, l2 = ax2.get_legend_handles_labels()
-            ax1.legend(h1+h2, l1+l2, loc="best")
-            ax1.set_title("Take-off (reaching altitude) + Hover (stabilization)")
-            plt.tight_layout()
+        h1, l1 = ax1.get_legend_handles_labels()
+        h2, l2 = ax2.get_legend_handles_labels()
+        ax1.legend(h1 + h2, l1 + l2, loc="best")
+        ax1.set_title("Take-off (reaching altitude) + Hover (stabilization)")
+        plt.tight_layout()
 
-            # nome file con timestamp
-            out_png = f"takeoff_hover_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-            plt.savefig(out_png, dpi=220)
-            plt.close(fig)
-            print(f"[INFO] Saved plot: {out_png} | hover_start={ts[idx_hover]:.2f}s, z_ss≈{target_z:.3f} m")
+        out_png = f"takeoff_hover_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        plt.savefig(out_png, dpi=220)
+        plt.close(fig)
+        print(f"[INFO] Saved plot: {out_png} | hover_start={ts[idx_hover]:.2f}s, z_ss≈{target_z:.3f} m")
+        print(f"[DBG] z_final={z[-1]:.3f} m, target_z={target_z:.3f} m")
     except Exception as e:
         print(f"[WARNING] plot fail: {e}")
 
-    return log_path, float(total_r)
+    return float(total_r)
 
 #### wandb
 #Inizializza una run di test e restituisce il nome della run
